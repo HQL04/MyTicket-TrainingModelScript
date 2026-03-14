@@ -18,6 +18,25 @@ dataset = load_dataset(
 
 df = dataset["train"].to_pandas()
 
+
+print("Normalizing interestScore...")
+
+def normalize_score(score):
+    if score == 0:
+        return 0
+    elif score <= 5:
+        return 1
+    elif score <= 20:
+        return 2
+    elif score <= 60:
+        return 3
+    else:
+        return 4
+
+df["interestScore"] = df["interestScore"].apply(normalize_score)
+print("Label distribution:")
+print(df["interestScore"].value_counts())
+
 features = [
     "age",
     "gender",
