@@ -11,7 +11,11 @@ HF_TOKEN = os.environ["HF_TOKEN"]
 
 print("Loading dataset from HuggingFace...")
 
-dataset = load_dataset("HQL04/MyTicket-training-dataset")
+dataset = load_dataset(
+    "HQL04/MyTicket-training-dataset",
+    token=HF_TOKEN
+)
+
 df = dataset["train"].to_pandas()
 
 features = [
@@ -30,16 +34,22 @@ features = [
 
 target = "interestScore"
 
+# Sort theo user_id để group đúng
+df = df.sort_values("user_id")
+
 X = df[features]
 y = df[target]
 
-print("Splitting dataset...")
+print("Preparing ranking groups...")
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+# mỗi user là một query
+group = df.groupby("user_id").size().to_list()
+
+train_data = lgb.Dataset(
+    X,
+    label=y,
+    group=group
 )
-
-train_data = lgb.Dataset(X_train, label=y_train)
 
 params = {
     "objective": "lambdarank",
