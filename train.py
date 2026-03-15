@@ -64,7 +64,7 @@ params = {
     "metric": "ndcg",
     "eval_at": [15],
     "learning_rate": 0.03,
-    "num_leaves": 31
+    "num_leaves": 64
 }
 
 print("Starting Group K-Fold training...")
