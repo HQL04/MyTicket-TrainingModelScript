@@ -8,6 +8,8 @@ on:
 jobs:
   train:
     runs-on: ubuntu-latest
+    env:   # đặt ở cấp job
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout repo
@@ -25,6 +27,5 @@ jobs:
       - name: Train model
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         run: |
           python train.py
