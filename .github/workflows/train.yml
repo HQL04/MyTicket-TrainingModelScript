@@ -25,5 +25,6 @@ jobs:
       - name: Train model
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         run: |
           python train.py
