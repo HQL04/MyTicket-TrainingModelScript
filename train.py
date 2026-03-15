@@ -1,11 +1,11 @@
-import os
-import pandas as pd
-import lightgbm as lgb
-from datasets import load_dataset
-from huggingface_hub import HfApi
-from sklearn.model_selection import train_test_split
-import onnxmltools
-from onnxmltools.convert.common.data_types import FloatTensorType
+import  os
+import  pandas      as pd
+import  lightgbm    as lgb
+from    datasets                import load_dataset
+from    huggingface_hub         import HfApi
+from    sklearn.model_selection import GroupKFold
+import  onnxmltools
+from    onnxmltools.convert.common.data_types import FloatTensorType
 
 HF_TOKEN = os.environ["HF_TOKEN"]
 
@@ -17,7 +17,6 @@ dataset = load_dataset(
 )
 
 df = dataset["train"].to_pandas()
-
 
 print("Normalizing interestScore...")
 
@@ -34,6 +33,7 @@ def normalize_score(score):
         return 4
 
 df["interestScore"] = df["interestScore"].apply(normalize_score)
+
 print("Label distribution:")
 print(df["interestScore"].value_counts())
 
@@ -53,22 +53,11 @@ features = [
 
 target = "interestScore"
 
-# Sort theo user_id để group đúng
 df = df.sort_values("user_id")
 
 X = df[features]
 y = df[target]
-
-print("Preparing ranking groups...")
-
-# mỗi user là một query
-group = df.groupby("user_id").size().to_list()
-
-train_data = lgb.Dataset(
-    X,
-    label=y,
-    group=group
-)
+groups = df["user_id"]
 
 params = {
     "objective": "lambdarank",
@@ -77,12 +66,68 @@ params = {
     "num_leaves": 31
 }
 
-print("Training LightGBM ranker...")
+print("Starting Group K-Fold training...")
+
+gkf = GroupKFold(n_splits=5)
+
+best_iterations = []
+
+for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
+
+    print(f"\nTraining fold {fold+1}")
+
+    X_train = X.iloc[train_idx]
+    y_train = y.iloc[train_idx]
+    X_val = X.iloc[val_idx]
+    y_val = y.iloc[val_idx]
+
+    train_users = df.iloc[train_idx]["user_id"]
+    val_users = df.iloc[val_idx]["user_id"]
+
+    train_group = train_users.groupby(train_users).size().to_list()
+    val_group = val_users.groupby(val_users).size().to_list()
+
+    train_data = lgb.Dataset(
+        X_train,
+        label=y_train,
+        group=train_group
+    )
+
+    val_data = lgb.Dataset(
+        X_val,
+        label=y_val,
+        group=val_group
+    )
+
+    model = lgb.train(
+        params,
+        train_data,
+        valid_sets=[val_data],
+        num_boost_round=1000,
+        callbacks=[lgb.early_stopping(50)]
+    )
+
+    best_iterations.append(model.best_iteration)
+
+print("\nKFold finished")
+
+best_round = int(sum(best_iterations) / len(best_iterations))
+print("Best iteration:", best_round)
+
+print("\nTraining final model on full dataset...")
+
+group = df.groupby("user_id").size().to_list()
+
+train_data = lgb.Dataset(
+    X,
+    label=y,
+    group=group
+)
 
 model = lgb.train(
     params,
     train_data,
-    num_boost_round=100
+    num_boost_round=best_round
 )
 
 print("Saving model...")

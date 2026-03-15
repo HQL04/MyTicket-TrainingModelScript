@@ -5,5 +5,5 @@ datasets
 huggingface_hub
 scikit-learn
 onnxmltools
-skl2onnx
 onnx
+onnxruntime
