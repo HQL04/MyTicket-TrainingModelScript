@@ -61,8 +61,8 @@ groups = df["user_id"]
 
 params = {
     "objective": "lambdarank",
-    "metric": "ndcg",
-    "learning_rate": 0.05,
+    "metric": "ndcg@15",
+    "learning_rate": 0.03,
     "num_leaves": 31
 }
 
