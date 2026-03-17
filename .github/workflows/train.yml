@@ -3,12 +3,12 @@ name: Train Recommendation Model
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "00 20 * * *"   # is 03:00 AM at Vietnam 
 
 jobs:
   train:
     runs-on: ubuntu-latest
-    env:   # đặt ở cấp job
+    env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
