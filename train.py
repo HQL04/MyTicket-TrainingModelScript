@@ -1,11 +1,12 @@
-import  os
-import  pandas      as pd
-import  lightgbm    as lgb
-from    datasets                import load_dataset
-from    huggingface_hub         import HfApi
-from    sklearn.model_selection import GroupKFold
-import  onnxmltools
-from    onnxmltools.convert.common.data_types import FloatTensorType
+import os
+import pandas as pd
+import numpy as np
+import lightgbm as lgb
+from datasets import load_dataset
+from huggingface_hub import HfApi
+from sklearn.model_selection import GroupKFold
+import onnxmltools
+from onnxmltools.convert.common.data_types import FloatTensorType
 
 HF_TOKEN = os.environ["HF_TOKEN"]
 
@@ -18,25 +19,24 @@ dataset = load_dataset(
 
 df = dataset["train"].to_pandas()
 
-print("Normalizing interestScore...")
-
+# =========================
+# 1. Normalize label
+# =========================
 def normalize_score(score):
-    if score == 0:
-        return 0
-    elif score <= 5:
-        return 1
-    elif score <= 20:
-        return 2
-    elif score <= 60:
-        return 3
-    else:
-        return 4
+    if score == 0: return 0
+    elif score <= 5: return 1
+    elif score <= 20: return 2
+    elif score <= 60: return 3
+    else: return 4
 
 df["interestScore"] = df["interestScore"].apply(normalize_score)
 
 print("Label distribution:")
 print(df["interestScore"].value_counts())
 
+# =========================
+# 2. Features
+# =========================
 features = [
     "age",
     "gender",
@@ -53,100 +53,114 @@ features = [
 
 target = "interestScore"
 
+# ⚠️ QUAN TRỌNG: encode category -> số (tránh lỗi ONNX)
+df["gender"] = df["gender"].astype("category").cat.codes
+df["genre"]  = df["genre"].astype("category").cat.codes
+
+# sort theo user để group đúng
 df = df.sort_values("user_id")
 
-X = df[features]
+X = df[features].astype("float32")   # ⚠️ ép float32 cho ONNX
 y = df[target]
 groups = df["user_id"]
 
+# =========================
+# 3. Params
+# =========================
 params = {
     "objective": "lambdarank",
     "metric": "ndcg",
-    "eval_at": [15],
+    "ndcg_at": [15],
     "learning_rate": 0.03,
-    "num_leaves": 64
+    "num_leaves": 64,
+    "label_gain": [0, 1, 3, 7, 15],
+    "verbosity": -1
 }
 
+# =========================
+# 4. 5-Fold CV (chỉ để tìm best iteration)
+# =========================
 print("Starting Group K-Fold training...")
 
 gkf = GroupKFold(n_splits=5)
-
 best_iterations = []
+scores = []
 
 for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
-
     print(f"\nTraining fold {fold+1}")
 
-    X_train = X.iloc[train_idx]
-    y_train = y.iloc[train_idx]
-    X_val = X.iloc[val_idx]
-    y_val = y.iloc[val_idx]
+    X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
+    X_val, y_val     = X.iloc[val_idx], y.iloc[val_idx]
 
-    train_users = df.iloc[train_idx]["user_id"]
-    val_users = df.iloc[val_idx]["user_id"]
+    train_users = groups.iloc[train_idx]
+    val_users   = groups.iloc[val_idx]
 
     train_group = train_users.groupby(train_users).size().to_list()
-    val_group = val_users.groupby(val_users).size().to_list()
+    val_group   = val_users.groupby(val_users).size().to_list()
 
-    train_data = lgb.Dataset(
-        X_train,
-        label=y_train,
-        group=train_group
-    )
-
-    val_data = lgb.Dataset(
-        X_val,
-        label=y_val,
-        group=val_group
-    )
+    train_data = lgb.Dataset(X_train, label=y_train, group=train_group)
+    val_data   = lgb.Dataset(X_val, label=y_val, group=val_group)
 
     model = lgb.train(
         params,
         train_data,
         valid_sets=[val_data],
-        num_boost_round=1000,
+        num_boost_round=2000,
         callbacks=[lgb.early_stopping(50)]
     )
 
     best_iterations.append(model.best_iteration)
+    scores.append(model.best_score["valid_0"]["ndcg@15"])
 
 print("\nKFold finished")
+print("Mean NDCG:", np.mean(scores))
 
-best_round = int(sum(best_iterations) / len(best_iterations))
+# =========================
+# 5. Train FINAL model (1 model duy nhất)
+# =========================
+best_round = int(np.mean(best_iterations))
 print("Best iteration:", best_round)
 
 print("\nTraining final model on full dataset...")
 
-group = df.groupby("user_id").size().to_list()
+group_all = groups.groupby(groups).size().to_list()
 
 train_data = lgb.Dataset(
     X,
     label=y,
-    group=group
+    group=group_all
 )
 
-model = lgb.train(
+final_model = lgb.train(
     params,
     train_data,
     num_boost_round=best_round
 )
 
+# =========================
+# 6. Save model
+# =========================
 print("Saving model...")
+final_model.save_model("event_ranker.txt")
 
-model.save_model("event_ranker.txt")
-
+# =========================
+# 7. Convert ONNX
+# =========================
 print("Converting to ONNX...")
 
 initial_type = [("float_input", FloatTensorType([None, len(features)]))]
 
 onnx_model = onnxmltools.convert_lightgbm(
-    model,
+    final_model,
     initial_types=initial_type
 )
 
 with open("event_ranker.onnx", "wb") as f:
     f.write(onnx_model.SerializeToString())
 
+# =========================
+# 8. Upload HuggingFace
+# =========================
 print("Uploading model to HuggingFace...")
 
 api = HfApi()
