@@ -3,9 +3,10 @@ import sys
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
-from datasets import load_dataset
-from huggingface_hub import HfApi
+from datasets                import load_dataset
+from huggingface_hub         import HfApi
 from sklearn.model_selection import GroupKFold
+from sklearn                 import __version__ as sklearn_version
 import onnxmltools
 from onnxmltools.convert.common.data_types import FloatTensorType
 
