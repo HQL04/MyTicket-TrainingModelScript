@@ -8,6 +8,15 @@ from sklearn.model_selection import GroupKFold
 import onnxmltools
 from onnxmltools.convert.common.data_types import FloatTensorType
 
+print("Python version:", sys.version)
+print("pandas:", pd.__version__)
+print("numpy:", np.__version__)
+print("lightgbm:", lgb.__version__)
+print("scikit-learn:", sklearn.__version__)
+print("onnxmltools:", onnxmltools.__version__)
+print("datasets:", datasets.__version__)
+print("huggingface_hub:", huggingface_hub.__version__)
+
 HF_TOKEN = os.environ["HF_TOKEN"]
 
 print("Loading dataset from HuggingFace...")
