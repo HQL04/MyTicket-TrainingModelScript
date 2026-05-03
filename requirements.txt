@@ -1,9 +1,9 @@
-lightgbm
-pandas
-numpy
-datasets
-huggingface_hub
-scikit-learn
-onnxmltools
+lightgbm==4.6.0
+pandas==2.3.3
+numpy==2.2.6
+datasets==4.8.5
+huggingface_hub==1.13.0
+scikit-learn==1.7.2
+onnxmltools==1.16.0
 onnx
 onnxruntime
