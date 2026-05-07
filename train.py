@@ -21,6 +21,8 @@ from sklearn.metrics import (
     classification_report
 )
 
+import time
+
 print("Python:", sys.version)
 print("pandas:", pd.__version__)
 print("numpy:", np.__version__)
@@ -271,9 +273,6 @@ print("Mean MRR:", mean_mrr)
 # =========================
 # 5. Train FINAL model (1 model duy nhất)
 # =========================
-best_round = int(np.mean(best_iterations))
-print("Best iteration:", best_round)
-
 print("\nTraining final model on full dataset...")
 
 group_all = groups.groupby(groups).size().to_list()
@@ -283,6 +282,8 @@ train_data = lgb.Dataset(
     label=y,
     group=group_all
 )
+# Tính training time
+train_start = time.time()
 
 final_model = lgb.train(
     params,
@@ -290,6 +291,9 @@ final_model = lgb.train(
     num_boost_round=best_round
 )
 
+train_end = time.time()
+training_time = train_end - train_start
+print(f"Training Time: {training_time:.2f} seconds")
 # =========================
 # 6. Save model
 # =========================
@@ -392,7 +396,8 @@ metrics = {
     "precision@10": mean_precision,
     "recall@10": mean_recall,
     "mrr": mean_mrr,
-    "best_iteration": int(best_round)
+    "best_iteration": int(best_round),
+    "training_time": training_time
 }
 
 with open("metrics.json", "w") as f:
