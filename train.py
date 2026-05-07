@@ -12,6 +12,15 @@ from sklearn.model_selection import GroupKFold
 from sklearn import __version__ as sklearn_version
 from onnxmltools.convert.common.data_types import FloatTensorType
 
+import json
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.metrics import (
+    confusion_matrix,
+    classification_report
+)
+
 print("Python:", sys.version)
 print("pandas:", pd.__version__)
 print("numpy:", np.__version__)
@@ -128,6 +137,137 @@ for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
 print("\nKFold finished")
 print("Mean NDCG:", np.mean(scores))
 
+best_round = int(np.mean(best_iterations))
+print("Best iteration:", best_round)
+
+# =========================
+# Precision@K & Recall@K
+# =========================
+def precision_recall_at_k(y_true, y_scores, k=10):
+
+    top_k_idx = np.argsort(y_scores)[::-1][:k]
+
+    y_true_topk = y_true.iloc[top_k_idx]
+
+    relevant = (y_true_topk >= 3).sum()
+
+    precision = relevant / k
+
+    total_relevant = (y_true >= 3).sum()
+
+    recall = relevant / total_relevant if total_relevant > 0 else 0
+
+    return precision, recall
+
+precision_scores = []
+recall_scores = []
+
+for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
+
+    X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
+    X_val, y_val     = X.iloc[val_idx], y.iloc[val_idx]
+
+    train_users = groups.iloc[train_idx]
+    val_users   = groups.iloc[val_idx]
+
+    train_group = train_users.groupby(train_users).size().to_list()
+
+    train_data = lgb.Dataset(
+        X_train,
+        label=y_train,
+        group=train_group
+    )
+
+    model = lgb.train(
+        params,
+        train_data,
+        num_boost_round=best_round
+    )
+
+    y_pred = model.predict(X_val)
+
+    precision, recall = precision_recall_at_k(
+        y_val,
+        y_pred,
+        k=10
+    )
+
+    precision_scores.append(precision)
+    recall_scores.append(recall)
+
+mean_precision = float(np.mean(precision_scores))
+mean_recall = float(np.mean(recall_scores))
+
+print("Mean Precision@10:", mean_precision)
+print("Mean Recall@10:", mean_recall)
+
+# =========================
+# MRR Evaluation
+# =========================
+print("\nCalculating MRR...")
+
+def reciprocal_rank_per_user(y_true, y_scores):
+
+    sorted_idx = np.argsort(y_scores)[::-1]
+
+    y_true_sorted = y_true.iloc[sorted_idx]
+
+    for rank, label in enumerate(y_true_sorted, start=1):
+
+        if label >= 3:
+            return 1 / rank
+
+    return 0
+
+mrr_scores = []
+
+for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
+
+    X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
+    X_val, y_val     = X.iloc[val_idx], y.iloc[val_idx]
+
+    train_users = groups.iloc[train_idx]
+    val_users   = groups.iloc[val_idx]
+
+    train_group = train_users.groupby(train_users).size().to_list()
+
+    train_data = lgb.Dataset(
+        X_train,
+        label=y_train,
+        group=train_group
+    )
+
+    model = lgb.train(
+        params,
+        train_data,
+        num_boost_round=best_round
+    )
+
+    y_pred = model.predict(X_val)
+
+    val_df = pd.DataFrame({
+        "user": val_users.values,
+        "label": y_val.values,
+        "score": y_pred
+    })
+
+    user_rr = []
+
+    for user_id, group_df in val_df.groupby("user"):
+
+        rr = reciprocal_rank_per_user(
+            group_df["label"],
+            group_df["score"]
+        )
+
+        user_rr.append(rr)
+
+    mrr_scores.append(np.mean(user_rr))
+
+mean_mrr = float(np.mean(mrr_scores))
+
+print("Mean MRR:", mean_mrr)
+
 # =========================
 # 5. Train FINAL model (1 model duy nhất)
 # =========================
@@ -172,18 +312,119 @@ with open("event_ranker.onnx", "wb") as f:
     f.write(onnx_model.SerializeToString())
 
 # =========================
+# Feature Importance
+# =========================
+print("Generating Feature Importance...")
+
+feature_imp = pd.DataFrame(
+    sorted(
+        zip(final_model.feature_importance(), features)
+    ),
+    columns=['Value', 'Feature']
+)
+
+plt.figure(figsize=(10, 6))
+
+sns.barplot(
+    x="Value",
+    y="Feature",
+    data=feature_imp.sort_values(
+        by="Value",
+        ascending=False
+    )
+)
+
+plt.title('Event Recommendation Feature Importance')
+
+plt.tight_layout()
+
+plt.savefig("feature_importance.png")
+
+plt.close()
+
+# =========================
+# Confusion Matrix
+# =========================
+print("Generating Confusion Matrix...")
+
+y_pred_score = final_model.predict(X)
+
+y_pred_label = pd.qcut(
+    y_pred_score,
+    q=5,
+    labels=[0,1,2,3,4]
+)
+
+report = classification_report(
+    y,
+    y_pred_label
+)
+
+with open("classification_report.txt", "w") as f:
+    f.write(report)
+
+cm = confusion_matrix(y, y_pred_label)
+
+plt.figure(figsize=(8, 6))
+
+sns.heatmap(
+    cm,
+    annot=True,
+    fmt='d',
+    cmap='Blues'
+)
+
+plt.xlabel('Predicted Label')
+plt.ylabel('True Label')
+plt.title('Confusion Matrix')
+
+plt.tight_layout()
+
+plt.savefig("confusion_matrix.png")
+
+plt.close()
+
+# =========================
+# Save Metrics
+# =========================
+metrics = {
+    "ndcg@15": float(np.mean(scores)),
+    "precision@10": mean_precision,
+    "recall@10": mean_recall,
+    "mrr": mean_mrr,
+    "best_iteration": int(best_round)
+}
+
+with open("metrics.json", "w") as f:
+    json.dump(metrics, f, indent=4)
+
+print("Metrics saved!")
+
+# =========================
 # 8. Upload HuggingFace
 # =========================
 print("Uploading model to HuggingFace...")
 
 api = HfApi()
 
-api.upload_file(
-    path_or_fileobj="event_ranker.onnx",
-    path_in_repo="event_ranker.onnx",
-    repo_id="HQL04/EventRecommendation",
-    repo_type="model",
-    token=HF_TOKEN
-)
+files_to_upload = [
+    "event_ranker.onnx",
+    "feature_importance.png",
+    "confusion_matrix.png",
+    "classification_report.txt",
+    "metrics.json"
+]
 
-print("Model uploaded successfully!")
+for file in files_to_upload:
+
+    print(f"Uploading {file}...")
+
+    api.upload_file(
+        path_or_fileobj=file,
+        path_in_repo=file,
+        repo_id="HQL04/EventRecommendation",
+        repo_type="model",
+        token=HF_TOKEN
+    )
+
+print("All artifacts uploaded successfully!")
