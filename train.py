@@ -324,10 +324,6 @@ onnx_size = os.path.getsize("event_ranker.onnx") / (1024 * 1024)
 print(f"LightGBM model size: {lgb_size:.2f} MB")
 print(f"ONNX model size: {onnx_size:.2f} MB")
 print(f"Size difference: {onnx_size - lgb_size:.2f} MB")
-
-# Ghi thêm vào metrics
-metrics["lgb_model_size_MB"] = round(lgb_size, 2)
-metrics["onnx_model_size_MB"] = round(onnx_size, 2)
 # =========================
 # Feature Importance
 # =========================
@@ -410,7 +406,9 @@ metrics = {
     "recall@10": mean_recall,
     "mrr": mean_mrr,
     "best_iteration": int(best_round),
-    "training_time": training_time
+    "training_time": training_time,
+    "lgb_model_size_MB": round(lgb_size, 2),
+    "onnx_model_size_MB": round(onnx_size, 2)
 }
 
 with open("metrics.json", "w") as f:
