@@ -7,3 +7,7 @@ scikit-learn==1.7.2
 onnxmltools==1.16.0
 onnx
 onnxruntime
+scikit-learn
+matplotlib
+seaborn
+openpyxl
